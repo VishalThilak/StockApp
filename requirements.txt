@@ -1,0 +1,8 @@
+beautifulsoup4==4.11.1
+fbprophet==0.7.1
+numpy==1.22.3
+pandas==1.4.2
+plotly==5.8.0
+streamlit==1.9.1
+vaderSentiment==3.3.2
+yfinance==0.1.70
