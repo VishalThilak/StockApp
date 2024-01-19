@@ -4,6 +4,7 @@
 
 A stock web application that uses machine learning to predict the forcast of a stock. The user simple selects
 the stock of their choosing, and then they see a timeline of the stocks trend. 
+In addition, I have created my own LSTM model attempting to predict the trend of a stock and seeing how accurate it is.
 
 ## Getting Started
 
@@ -38,3 +39,5 @@ Vishal Thilak
 
 * 0.1
     * Initial Release
+ * 02
+    * Added an LSTM model to attempt to create my own AI
