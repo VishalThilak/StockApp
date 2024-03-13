@@ -1,14 +1,16 @@
 import streamlit as st
-from datetime import date
+from datetime import datetime, date
 import pandas as pd
 import numpy as np
+import requests
 import yfinance as yf
 from plotly import graph_objs as go
-from fbprophet import Prophet
-from fbprophet.plot import plot_plotly
+from prophet import Prophet
+from prophet.plot import plot_plotly
 from urllib.request import urlopen, Request
 from bs4 import BeautifulSoup
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from urllib.error import HTTPError
 
 # Setting up page title and icon as the first command
 st.set_page_config(page_title='Stock Quest', page_icon='📈', layout='wide')
@@ -56,7 +58,7 @@ def selected_stock():
     st.write("You selected: ", stock)
     return stock
 
-@st.cache
+@st.cache_data
 def history(ticker):
     '''
     Generate history based on ticker
@@ -134,86 +136,64 @@ def pred_graph(df):
 
 def sentiment_chart(ticker):
     '''
-    Create and plot a bar chart showing the sentiment of a stock on various days
-    param: ticker of company
-    return: nothing
+    Fetch and parse news headlines and timestamps for the given ticker, then perform sentiment analysis.
+    If the webpage for the ticker cannot be found, outputs a message indicating no data is available.
     '''
-    # Website from which the stock news data is extracted from
-    finwiz_url = 'https://finviz.com/quote.ashx?t='
-    url = finwiz_url + ticker
 
-    # Requesting the html data
-    req = Request(url=url, headers={'User-Agent': 'Mozilla/5.0'})
+    finviz_url = 'https://finviz.com/quote.ashx?t='
+    url = finviz_url + ticker
     
-    # Opening the request
-    response = urlopen(req)
+    try:
+        req = Request(url=url, headers={'User-Agent': 'Mozilla/5.0'})
+        response = urlopen(req)
 
-    # Passing the response to get the source code of the website
-    html = BeautifulSoup(response)
+    except HTTPError as e:
+        st.error(f"No data available for {ticker}. HTTP Error {e.code}: {e.reason}")
+        return
 
-    # The news artile titles in the html in the id "tab-link-news"
-    news_table = html.find(id='news-table')
+    html = BeautifulSoup(response, 'html.parser')
 
-    # List to keep track of the headlines and dates
+    news_table = html.findAll('tr', class_='cursor-pointer has-label')
     news_parsed = []
 
-    # Interate through all the tr tags
-    for row in news_table.findAll('tr'):
-        # News headlines
-        headline = row.a.get_text()    
+    for row in news_table:
 
-        # Date
-        date_text = row.td.text.split(' ')
+        timestamp = row.find('td', align='right').text.strip()
+        headline = row.find('a', class_='tab-link-news').get_text().strip()
+        news_parsed.append([timestamp, headline])
 
-        # If length is only 1 that means theres only time
-        if len(date_text) == 1: 
-            time = date_text[0]
+    if not news_parsed:
+        
+        st.error(f"No news data available for {ticker}.")
+        return
 
-        else:
-            date = date_text[0]
-            time = date_text[1]
-
-        # Appended to the news_parsed list
-        news_parsed.append([date, headline, time])
-
-    # Sentiment Analyses
+    # Sentiment Analysis
     vader = SentimentIntensityAnalyzer()
-    dataframe = pd.DataFrame(news_parsed, columns=['date', 'headline', 'time'])
-    headlines = dataframe['headline']
-    scores = (headlines).apply(vader.polarity_scores).tolist()
-    dataframe = dataframe.join(pd.DataFrame(scores), rsuffix=' right')
+    dataframe = pd.DataFrame(news_parsed, columns=['date', 'headline'])
+    dataframe['date'] = pd.to_datetime(dataframe['date'], errors='coerce').dt.date
+    dataframe['compound'] = dataframe['headline'].apply(lambda x: vader.polarity_scores(x)['compound'])
 
-    # Convert the date to datatime year-month-date
-    dataframe['date'] = pd.to_datetime(dataframe.date).dt.date
-
-    # Average the scores for the same dates
-    mean_scores = dataframe.groupby(['date']).mean()
-    mean_scores.reset_index(inplace=True)
-
-    # Droping everything but date and compoud
-    mean_scores.drop(['neg', 'neu', 'pos'], axis=1, inplace=True)
-
-    # Multiplying all the sentiment scores for 100 to make it more visible
+    # Group by date and calculate mean sentiment score
+    mean_scores = dataframe.groupby('date')['compound'].mean().reset_index()
     mean_scores['compound'] = 100 * mean_scores['compound']
-    
-    # Adding column color for if its negative or positive
-    mean_scores['Color'] = np.where(mean_scores['compound']<0, 'red', 'blue')
+    mean_scores['color'] = np.where(mean_scores['compound'] < 0, 'red', 'blue')
 
-    # Creating the bar chart
+    # Sentiment Chart
     st.subheader("Sentiment Chart")
     st.caption("No bar means neutral assessment")
-    fig = go.Figure(go.Bar(x=mean_scores['date'], y=mean_scores['compound'], marker_color=mean_scores['Color']))
+    fig = go.Figure(go.Bar(x=mean_scores['date'], y=mean_scores['compound'], marker_color=mean_scores['color']))
     fig.update_layout(barmode='relative', width=740, height=500)
     fig.update_xaxes(title_text='<b>Date</b>')
     fig.update_yaxes(title_text='<b>Overall Sentiment</b>')
     fig.layout.update(title_text='<i>Sentiment Bar Chart</i>')
     fig.update_layout(width=1400, height=500)
     st.plotly_chart(fig)
-    
+
     # Showing all the headlines and dates
     st.subheader("Headlines of News Articles")
-    df = dataframe[["date", "headline"]]
+    df = dataframe[['date', 'headline']]
     st.dataframe(df)
+
 
 # Run functions
 custimize_streamlit()
@@ -223,4 +203,3 @@ market_data = history(tickers_list[ticker_index])
 sentiment_chart(tickers_list[ticker_index])
 current_graph(market_data)
 pred_graph(market_data)
-
